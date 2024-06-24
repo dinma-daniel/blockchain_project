@@ -19,7 +19,3 @@ def create_dummy_transaction():
         'public_key': vk_hex
     }
     return transaction
-
-sk, vk = generate_key_pair()
-transaction = create_dummy_transaction(sk)
-print("Created transaction:", transaction)
