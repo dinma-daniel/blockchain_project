@@ -76,7 +76,7 @@ class MerkleTree:
         return self.root.value
 
 
-def mixmerkletree() -> None:
+def testmerkletree() -> None:
     elems = ["GeeksforGeeks", "A", "Computer",
              "Science", "Portal", "For", "Geeks"]
     # as there are odd number of inputs, the last input is repeated
@@ -87,7 +87,7 @@ def mixmerkletree() -> None:
     print("Root Hash: "+mtree.getRootHash()+"\n")
     mtree.printTree()
 
-
-mixmerkletree()
+if __name__ == '__main__':
+    testmerkletree()
 
 # This code was contributed by Pranay Arora (TSEC-2023).
