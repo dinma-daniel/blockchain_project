@@ -5,22 +5,20 @@ from nacl.encoding import HexEncoder
 from nacl.hash import sha256
 
 # using libsodium for key generation
-def generate_key_pair():
-    sk = SigningKey.generate()
-    vk = sk.verify_key
-    return sk, vk
+sk = SigningKey.generate()
+vk = sk.verify_key
 
-def create_dummy_transaction(sk):
+def create_dummy_transaction():
     nonce = os.urandom(16).hex()
     message = nonce.encode()
     signature = sk.sign(message, encoder=HexEncoder).signature.decode()
-    vk = sk.verify_key.encode(encoder=HexEncoder).decode()
+    vk_hex = vk.encode(encoder=HexEncoder).decode()
     transaction = {
         'nonce': nonce,
         'signature': signature,
-        'public_key': vk
+        'public_key': vk_hex
     }
-    return json.dumps(transaction)
+    return transaction
 
 sk, vk = generate_key_pair()
 transaction = create_dummy_transaction(sk)
