@@ -8,8 +8,8 @@ if __name__ == '__main__':
         description='Scale the number of nodes',
         epilog='Designed for A27 Fundamentals and Design of Blockchain-based Systems')
     parser.add_argument('num_nodes', type=int)
-    parser.add_argument('topology_file', type=str, nargs='?', default='topologies/ring.yaml')
-    parser.add_argument('algorithm', type=str, nargs='?', default='echo')
+    parser.add_argument('topology_file', type=str, nargs='?', default='topologies/blockchain.yaml')
+    parser.add_argument('algorithm', type=str, nargs='?', default='blockchain')
     parser.add_argument('template_file', type=str, nargs='?', default='docker-compose.template.yml')
     args = parser.parse_args()
 

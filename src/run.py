@@ -2,7 +2,7 @@ import argparse
 import yaml
 from asyncio import run
 from ipv8.configuration import ConfigBuilder, default_bootstrap_defs
-from ipv8.util import create_event_with_signals
+from ipv8.util import create_event_with_signals, run_forever
 from ipv8_service import IPv8
 from algorithms import *
 from algorithms.blockchain import BlockchainNode
@@ -40,9 +40,10 @@ async def start_communities(node_id, connections, algorithm, use_localhost=True)
         builder.finalize(), extra_communities={"blockchain_community": algorithm}
     )
     await ipv8_instance.start()
-    await event.wait()
-    await ipv8_instance.stop()
-
+    # await event.wait()
+    print(f"Node {node_id} started and connected. Entering infinite loop.")
+    # await ipv8_instance.stop()
+    await run_forever()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

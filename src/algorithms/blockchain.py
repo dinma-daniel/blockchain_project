@@ -46,6 +46,7 @@ class BlockchainNode(Blockchain):
         self.add_message_handler(PuzzleMessage, self.on_puzzle_message)
 
     def on_start(self):
+        print(f'[Node {self.node_id}] Community started with ID: {self.community_id}')
         if self.node_id % 2 == 0:
             #  Run client
             self.start_client()
