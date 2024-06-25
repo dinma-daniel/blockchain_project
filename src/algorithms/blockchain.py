@@ -1,4 +1,5 @@
 import random
+import hashlib
 from collections import defaultdict
 
 from ipv8.community import CommunitySettings
@@ -41,18 +42,19 @@ class BlockchainNode(Blockchain):
         self.pending_txs = []
         self.finalized_txs = []
         self.balances = defaultdict(lambda: 1000)
+        self.current_puzzle = None
 
         self.add_message_handler(Transaction, self.on_transaction)
         self.add_message_handler(PuzzleMessage, self.on_puzzle_message)
 
     def on_start(self):
         print(f'[Node {self.node_id}] Community started with ID: {self.community_id}')
-        if self.node_id % 2 == 0:
-            #  Run client
-            self.start_client()
-        else:
+        # if self.node_id % 2 == 0:
+        #     #  Run client
+        #     self.start_client()
+        # else:
             # Run validator
-            self.start_validator()
+        self.start_validator()
 
         self.create_puzzle()
 
@@ -87,7 +89,8 @@ class BlockchainNode(Blockchain):
                            interval=1)
 
     def start_validator(self):
-        self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
+        # self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
+        self.register_task("solve_puzzle", self.solve_puzzle_task, delay=1, interval=1)
 
     def check_transactions(self):
         for tx in self.pending_txs:
@@ -102,6 +105,28 @@ class BlockchainNode(Blockchain):
         if self.executed_checks > 10:
             self.cancel_pending_task("check_txs")
             print(self.balances)
+            self.stop()
+
+    def hash_function(self, puzzle_id, x):
+        return hashlib.sha256(f'{puzzle_id}{x}'.encode()).hexdigest()
+
+    def solve_puzzle(self, puzzle_id, difficulty):
+        x = 0
+        target = '0' * difficulty
+        while True:
+            hash_value = self.hash_function(puzzle_id, x)
+            if hash_value.startswith(target):
+                return x
+            x += 1
+
+    async def solve_puzzle_task(self):
+        if self.current_puzzle:
+            puzzle_id, difficulty = self.current_puzzle
+            solution = self.solve_puzzle(puzzle_id, difficulty)
+            print(f'[Node {self.node_id}] Solved puzzle with solution {solution}')
+            self.current_puzzle = None
+
+            self.cancel_pending_task("solve_puzzle_task")
             self.stop()
 
     @message_wrapper(Transaction)
@@ -119,4 +144,4 @@ class BlockchainNode(Blockchain):
     @message_wrapper(PuzzleMessage)
     async def on_puzzle_message(self, peer: Peer, payload: PuzzleMessage) -> None:
         print(f'[Node {self.node_id}] Received puzzle message: {payload.puzzle_id} with difficulty {payload.difficulty}')
-        # Handle puzzle message logic if needed
+        self.current_puzzle = (payload.puzzle_id, payload.difficulty)
