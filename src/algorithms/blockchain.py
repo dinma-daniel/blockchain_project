@@ -22,8 +22,15 @@ class Transaction:
     amount: int
     nonce: int = 1
 
+@dataclass(
+    msg_id=99
+)
+class PuzzleMessage:
+    puzzle_id: str
+    difficulty: int
 
 class BlockchainNode(Blockchain):
+    community_id = b'harbourspaceuniverse'
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
@@ -36,6 +43,7 @@ class BlockchainNode(Blockchain):
         self.balances = defaultdict(lambda: 1000)
 
         self.add_message_handler(Transaction, self.on_transaction)
+        self.add_message_handler(PuzzleMessage, self.on_puzzle_message)
 
     def on_start(self):
         if self.node_id % 2 == 0:
@@ -44,6 +52,8 @@ class BlockchainNode(Blockchain):
         else:
             # Run validator
             self.start_validator()
+
+        self.create_puzzle()
 
     def create_transaction(self):
         peer = random.choice([i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1])
@@ -61,6 +71,12 @@ class BlockchainNode(Blockchain):
             self.cancel_pending_task("tx_create")
             self.stop()
             return
+
+    def create_puzzle(self):
+        puzzle = PuzzleMessage(puzzle_id='v.kotunov', difficulty=6)
+        print(f'[Node {self.node_id}] Creating puzzle with ID {puzzle.puzzle_id} and difficulty {puzzle.difficulty}')
+        for peer in self.get_peers():
+            self.ez_send(peer, puzzle)
 
     def start_client(self):
         # Create transaction and send to random validator
@@ -98,3 +114,8 @@ class BlockchainNode(Blockchain):
         # Gossip to other nodes
         for peer in [i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1]:
             self.ez_send(peer, payload)
+
+    @message_wrapper(PuzzleMessage)
+    async def on_puzzle_message(self, peer: Peer, payload: PuzzleMessage) -> None:
+        print(f'[Node {self.node_id}] Received puzzle message: {payload.puzzle_id} with difficulty {payload.difficulty}')
+        # Handle puzzle message logic if needed

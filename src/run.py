@@ -11,8 +11,8 @@ from da_types import Blockchain
 
 def get_algorithm(name: str) -> Blockchain:
     algorithms = {
-        'echo': EchoAlgorithm,
-        'election': RingElection,
+        # 'echo': EchoAlgorithm,
+        # 'election': RingElection,
         'blockchain': BlockchainNode,
     }
     if name not in algorithms.keys():
@@ -51,8 +51,8 @@ if __name__ == "__main__":
         epilog="Designed for A27 Fundamentals and Design of Blockchain-based Systems",
     )
     parser.add_argument("node_id", type=int)
-    parser.add_argument("topology", type=str, nargs="?", default="topologies/default.yaml")
-    parser.add_argument("algorithm", type=str, nargs="?", default='echo')
+    parser.add_argument("topology", type=str, nargs="?", default="topologies/blockchain.yaml")
+    parser.add_argument("algorithm", type=str, nargs="?", default='blockchain')
     parser.add_argument("-docker", action='store_true')
     args = parser.parse_args()
     node_id = args.node_id
