@@ -40,18 +40,16 @@ async def start_communities(node_id, connections, algorithm, use_localhost=True)
         builder.finalize(), extra_communities={"blockchain_community": algorithm}
     )
     await ipv8_instance.start()
-    # await event.wait()
-    print(f"Node {node_id} started and connected. Entering infinite loop.")
-    # await ipv8_instance.stop()
-    await run_forever()
+    await event.wait()
+    await ipv8_instance.stop()
 
-if __name__ == "__main__":
+async def main():
     parser = argparse.ArgumentParser(
         prog="Blockchain",
         description="Code to execute blockchain.",
         epilog="Designed for A27 Fundamentals and Design of Blockchain-based Systems",
     )
-    parser.add_argument("node_id", type=int)
+    parser.add_argument("node_id", type=int, nargs="?", default=0)
     parser.add_argument("topology", type=str, nargs="?", default="topologies/blockchain.yaml")
     parser.add_argument("algorithm", type=str, nargs="?", default='blockchain')
     parser.add_argument("-docker", action='store_true')
@@ -63,4 +61,8 @@ if __name__ == "__main__":
         topology = yaml.safe_load(f)
         connections = topology[node_id]
 
-        run(start_communities(node_id, connections, alg, not args.docker))
+    tasks = [start_communities(i, topology[i], alg, not args.docker) for i in range(4)]
+    await asyncio.gather(*tasks)
+
+if __name__ == "__main__":
+    asyncio.run(main())
