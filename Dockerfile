@@ -9,7 +9,8 @@ WORKDIR /home/python
 ENV PIP_ROOT_USER_ACTION=ignore
 RUN pip install --upgrade pip
 RUN pip install wheel
+RUN pip install PyNaCL
 RUN pip install -r requirements.txt
 COPY src /home/python/src
 COPY topologies /home/python/topologies
-CMD python -u src/run.py $PID $TOPOLOGY $ALGORITHM -docker
+CMD python -u src/node.py $PID $TOPOLOGY $ALGORITHM -docker
