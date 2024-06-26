@@ -87,7 +87,7 @@ def testmerkletree() -> None:
     print("Root Hash: "+mtree.getRootHash()+"\n")
     mtree.printTree()
 
-if __name__ == '__main__':
-    testmerkletree()
+# if __name__ == '__main__':
+#     testmerkletree()
 
 # This code was contributed by Pranay Arora (TSEC-2023).

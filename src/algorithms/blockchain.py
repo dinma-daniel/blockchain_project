@@ -1,5 +1,6 @@
 import random
 import hashlib
+from merkle import MerkleTree
 from collections import defaultdict
 
 from ipv8.community import CommunitySettings
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from ipv8.types import Peer
 
 from da_types import Blockchain, message_wrapper
+from typing import List
 
 # We are using a custom dataclass implementation.
 dataclass = overwrite_dataclass(dataclass)
@@ -24,11 +26,23 @@ class Transaction:
     nonce: int = 1
 
 @dataclass(
+    msg_id=90
+)
+class Block:
+    previous_hash: str
+    merkle_root: str
+    nonce: int
+    transactions: List[Transaction]
+
+    def compute_hash(self):
+        block_string = f"{self.previous_hash}{self.merkle_root}{self.nonce}"
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
+@dataclass(
     msg_id=99
 )
-class PuzzleMessage:
-    puzzle_id: str
-    difficulty: int
+class BlockMessage:
+    block: Block
 
 class BlockchainNode(Blockchain):
     community_id = b'harbourspaceuniverse'
@@ -36,30 +50,31 @@ class BlockchainNode(Blockchain):
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
         self.counter = 1
-        self.max_messages = 5
+        self.block_size = 3
         self.executed_checks = 0
 
         self.pending_txs = []
         self.finalized_txs = []
         self.balances = defaultdict(lambda: 1000)
-        self.current_puzzle = None
+        self.blockchain = []
 
         self.add_message_handler(Transaction, self.on_transaction)
-        self.add_message_handler(PuzzleMessage, self.on_puzzle_message)
+        self.add_message_handler(BlockMessage, self.on_block_message)
 
     def on_start(self):
         print(f'[Node {self.node_id}] Community started with ID: {self.community_id}')
-        # if self.node_id % 2 == 0:
-        #     #  Run client
-        #     self.start_client()
-        # else:
-            # Run validator
-        self.start_validator()
-
-        self.create_puzzle()
+        if self.node_id % 2 == 0:
+            self.start_client()
+        else:
+            self.start_validator()
 
     def create_transaction(self):
-        peer = random.choice([i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1])
+        peers = [i for i in self.get_peers() if self.node_id_from_peer(i) is not None and self.node_id_from_peer(i) % 2 == 1]
+        if not peers:
+            print(f'[Node {self.node_id}] No valid peers found for creating transaction.')
+            return
+
+        peer = random.choice(peers)
         peer_id = self.node_id_from_peer(peer)
 
         tx = Transaction(self.node_id,
@@ -70,27 +85,54 @@ class BlockchainNode(Blockchain):
         print(f'[Node {self.node_id}] Sending transaction {tx.nonce} to {self.node_id_from_peer(peer)}')
         self.ez_send(peer, tx)
 
-        if self.counter > self.max_messages:
-            self.cancel_pending_task("tx_create")
-            self.stop()
-            return
+    def create_block(self):
+        if len(self.pending_txs) < self.block_size:
+            return # not enough txs to create a block
 
-    def create_puzzle(self):
-        puzzle = PuzzleMessage(puzzle_id='v.kotunov', difficulty=6)
-        print(f'[Node {self.node_id}] Creating puzzle with ID {puzzle.puzzle_id} and difficulty {puzzle.difficulty}')
+        transactions = self.pending_txs[:self.block_size]
+        self.pending_txs = self.pending_txs[self.block_size:]
+
+        transaction_ids = [f"{tx.sender}-{tx.receiver}-{tx.amount}-{tx.nonce}" for tx in transactions]
+        merkle_tree = MerkleTree(transaction_ids)
+        merkle_root = merkle_tree.getRootHash()
+
+        previous_hash = self.get_previous_block_hash()
+        difficulty = 4
+        nonce, block_hash = self.solve_puzzle(previous_hash, merkle_root, difficulty)
+
+        block = Block(previous_hash, merkle_root, nonce, transactions)
+        self.finalized_txs.extend(transactions)
+        self.blockchain.append(block)
+        self.broadcast_block(block)
+        print(f"[Node {self.node_id}] Created block with nonce {nonce} and hash {block_hash}")
+
+    def get_previous_block_hash(self):
+        if not self.blockchain:
+            return "0" * 64
+        return self.blockchain[-1].compute_hash()
+
+    def solve_puzzle(self, previous_hash, merkle_root, difficulty):
+        target = '0' * difficulty
+        nonce = 0
+        while True:
+            block = Block(previous_hash, merkle_root, nonce, [])
+            block_hash = block.compute_hash()
+            if block_hash.startswith(target):
+                return nonce, block_hash
+            nonce += 1
+
+    def broadcast_block(self, block: Block):
         for peer in self.get_peers():
-            self.ez_send(peer, puzzle)
+            self.ez_send(peer, block)
 
     def start_client(self):
-        # Create transaction and send to random validator
-        # Or put node_id
         self.register_task("tx_create",
                            self.create_transaction, delay=1,
                            interval=1)
 
     def start_validator(self):
-        # self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
-        self.register_task("solve_puzzle", self.solve_puzzle_task, delay=1, interval=1)
+        self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
+        self.register_task("create_block", self.create_block, delay=5, interval=5)
 
     def check_transactions(self):
         for tx in self.pending_txs:
@@ -102,37 +144,11 @@ class BlockchainNode(Blockchain):
 
         self.executed_checks += 1
 
-        if self.executed_checks > 10:
-            self.cancel_pending_task("check_txs")
-            print(self.balances)
-            self.stop()
-
-    def hash_function(self, puzzle_id, x):
-        return hashlib.sha256(f'{puzzle_id}{x}'.encode()).hexdigest()
-
-    def solve_puzzle(self, puzzle_id, difficulty):
-        x = 0
-        target = '0' * difficulty
-        while True:
-            hash_value = self.hash_function(puzzle_id, x)
-            if hash_value.startswith(target):
-                return x
-            x += 1
-
-    async def solve_puzzle_task(self):
-        if self.current_puzzle:
-            puzzle_id, difficulty = self.current_puzzle
-            solution = self.solve_puzzle(puzzle_id, difficulty)
-            print(f'[Node {self.node_id}] Solved puzzle with solution {solution}')
-            self.current_puzzle = None
-
-            self.cancel_pending_task("solve_puzzle_task")
-            self.stop()
+        if self.executed_checks % 10 == 0:
+            print(f'balance: {self.balances}')
 
     @message_wrapper(Transaction)
     async def on_transaction(self, peer: Peer, payload: Transaction) -> None:
-
-        # Add to pending transactions
         if (payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.finalized_txs] and (
         payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.pending_txs]:
             self.pending_txs.append(payload)
@@ -141,7 +157,9 @@ class BlockchainNode(Blockchain):
         for peer in [i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1]:
             self.ez_send(peer, payload)
 
-    @message_wrapper(PuzzleMessage)
-    async def on_puzzle_message(self, peer: Peer, payload: PuzzleMessage) -> None:
-        print(f'[Node {self.node_id}] Received puzzle message: {payload.puzzle_id} with difficulty {payload.difficulty}')
-        self.current_puzzle = (payload.puzzle_id, payload.difficulty)
+    @message_wrapper(BlockMessage)
+    async def on_block_message(self, peer: Peer, payload: BlockMessage) -> None:
+        block = payload.block
+        print(f"[Node {self.node_id}] Received block with nonce {block.nonce} and hash {block.compute_hash()}")
+        # Validate and add the block to the chain
+        # (validation logic omitted for brevity)

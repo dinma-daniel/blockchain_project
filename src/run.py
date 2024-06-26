@@ -1,6 +1,6 @@
 import argparse
 import yaml
-from asyncio import run
+from asyncio import run, all_tasks
 from ipv8.configuration import ConfigBuilder, default_bootstrap_defs
 from ipv8.util import create_event_with_signals, run_forever
 from ipv8_service import IPv8
@@ -22,7 +22,7 @@ def get_algorithm(name: str) -> Blockchain:
 
 async def start_communities(node_id, connections, algorithm, use_localhost=True) -> None:
     event = create_event_with_signals()
-    base_port = 9090
+    base_port = 8090
     connections_updated = [(x, base_port + x) for x in connections]
     node_port = base_port + node_id
     builder = ConfigBuilder().clear_keys().clear_overlays()
@@ -65,4 +65,9 @@ async def main():
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        run(main())
+    except Exception as e:
+        print(f"Error: {e}")
+        for task in all_tasks():
+            task.cancel()
