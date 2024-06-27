@@ -122,8 +122,9 @@ class BlockchainNode(Blockchain):
             nonce += 1
 
     def broadcast_block(self, block: Block):
+        block_message = BlockMessage(block)
         for peer in self.get_peers():
-            self.ez_send(peer, block)
+            self.ez_send(peer, block_message)
 
     def start_client(self):
         self.register_task("tx_create",
@@ -147,19 +148,61 @@ class BlockchainNode(Blockchain):
         if self.executed_checks % 10 == 0:
             print(f'balance: {self.balances}')
 
+    def verify_transaction(self, tx: Transaction) -> bool:
+        if self.balances[tx.sender] - tx.amount >= 0:
+            return True
+        return False
+
+    def verify_block(self, block: Block) -> bool:
+        print(f"[Node {self.node_id}] Verifying block with nonce {block.nonce} and hash {block.compute_hash()}")
+
+        if block.previous_hash != self.get_previous_block_hash():
+            print(f"[Node {self.node_id}] Block rejected due to mismatched previous hash.")
+            return False
+        
+        transaction_ids = [f"{tx.sender}-{tx.receiver}-{tx.amount}-{tx.nonce}" for tx in block.transactions]
+        merkle_tree = MerkleTree(transaction_ids)
+        if block.merkle_root != merkle_tree.getRootHash():
+            print(f"[Node {self.node_id}] Block rejected due to invalid Merkle root.")
+            return False
+
+        for tx in block.transactions:
+            if not self.verify_transaction(tx):
+                print(f"[Node {self.node_id}] Block rejected due to invalid transaction: {tx}")
+                return False
+
+        difficulty = 4
+        if not block.compute_hash().startswith('0' * difficulty):
+            print(f"[Node {self.node_id}] Block rejected due to insufficient proof of work.")
+            return False
+
+        print(f"[Node {self.node_id}] Block validated successfully.")
+        return True
+    
+    def apply_block_transactions(self, block: Block):
+        for tx in block.transactions:
+            self.balances[tx.sender] -= tx.amount
+            self.balances[tx.receiver] += tx.amount
+        self.finalized_txs.extend(block.transactions)
+
     @message_wrapper(Transaction)
     async def on_transaction(self, peer: Peer, payload: Transaction) -> None:
-        if (payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.finalized_txs] and (
-        payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.pending_txs]:
-            self.pending_txs.append(payload)
+        if self.verify_transaction(payload):
+            if (payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.finalized_txs] and (
+            payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.pending_txs]:
+                self.pending_txs.append(payload)
 
-        # Gossip to other nodes
-        for peer in [i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1]:
-            self.ez_send(peer, payload)
+            # Gossip to other nodes
+            for peer in [i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1]:
+                self.ez_send(peer, payload)
 
     @message_wrapper(BlockMessage)
     async def on_block_message(self, peer: Peer, payload: BlockMessage) -> None:
         block = payload.block
-        print(f"[Node {self.node_id}] Received block with nonce {block.nonce} and hash {block.compute_hash()}")
-        # Validate and add the block to the chain
-        # (validation logic omitted for brevity)
+        block_hash = block.compute_hash()
+        print(f"[Node {self.node_id}] Received block with nonce {block.nonce} and hash {block_hash}")
+
+        if self.verify_block(block):
+            self.blockchain.append(block)
+            self.apply_block_transactions(block)
+            print(f"[Node {self.node_id}] Block added to the chain.")
