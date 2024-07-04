@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Asylum</title>
+
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>NFT Asylum</h1>
+            <p class="lead">Upload your image and let the blockchain magic happen</p>
+        </div>
+        <div class="form-container mx-auto" style="max-width: 500px;">
+            <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="file-upload" class="custom-file-upload">
+                        Choose an image to upload
+                    </label>
+                    <input type="file" class="form-control-file" id="file-upload" name="file" accept="image/*" required>
+                </div>
+                <button type="submit" class="btn btn-custom btn-block">Upload</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+    <script>
+        document.querySelector('.custom-file-upload').addEventListener('click', function() {
+            document.querySelector('#file-upload').click();
+        });
+
+        document.querySelector('#file-upload').addEventListener('change', function() {
+            document.querySelector('#upload-form').submit();
+        });
+    </script>
+</body>
+</html>

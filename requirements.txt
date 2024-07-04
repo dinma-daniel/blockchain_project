@@ -3,3 +3,4 @@ trio==0.14.0
 typing_extensions
 pyipv8==2.12
 pyyaml
+Flask
