@@ -11,28 +11,34 @@ from ipv8.types import Peer
 
 from da_types import Blockchain, message_wrapper
 from typing import List
+import time
 
 # We are using a custom dataclass implementation.
 dataclass = overwrite_dataclass(dataclass)
 
 
-@dataclass(
-    msg_id=1
-)  # The value 1 identifies this message and must be unique per community.
-class Transaction:
+@dataclass()
+class TransactionPayload:
     sender: int
     receiver: int
     amount: int
     nonce: int = 1
 
-@dataclass(
-    msg_id=90
-)
+
+@dataclass(msg_id=1)
+class Transaction:
+    payload: TransactionPayload
+    pk: bytes
+    sign: bytes
+
+
+@dataclass(msg_id=90)
 class Block:
     previous_hash: str
     merkle_root: str
     nonce: int
     transactions: List[Transaction]
+    timestamp: int
 
     def compute_hash(self):
         block_string = f"{self.previous_hash}{self.merkle_root}{self.nonce}"
@@ -77,12 +83,19 @@ class BlockchainNode(Blockchain):
         peer = random.choice(peers)
         peer_id = self.node_id_from_peer(peer)
 
-        tx = Transaction(self.node_id,
+        txp = TransactionPayload(self.node_id,
                          peer_id,
                          10,
-                         self.counter)
+                         self.counter,
+                         )
+        
+        blob = self.serializer.pack_serializable(txp)
+        sign = self.crypto.create_signature(self.my_peer.key, blob)
+        pk = self.my_peer.key.pub().key_to_bin()
+        tx = Transaction(txp, pk, sign)
+    
         self.counter += 1
-        print(f'[Node {self.node_id}] Sending transaction {tx.nonce} to {self.node_id_from_peer(peer)}')
+        print(f'[Node {self.node_id}] Sending transaction {txp.nonce} to {self.node_id_from_peer(peer)}')
         self.ez_send(peer, tx)
 
     def create_block(self):
@@ -90,9 +103,15 @@ class BlockchainNode(Blockchain):
             return # not enough txs to create a block
 
         transactions = self.pending_txs[:self.block_size]
+        
+        # ugly reward
+        # transactions += Transaction()
+
         self.pending_txs = self.pending_txs[self.block_size:]
 
-        transaction_ids = [f"{tx.sender}-{tx.receiver}-{tx.amount}-{tx.nonce}" for tx in transactions]
+        transaction_ids = [f"{tx.payload.sender}-{tx.payload.receiver}-{tx.payload.amount}-{tx.payload.nonce}" for tx in transactions]
+
+
         merkle_tree = MerkleTree(transaction_ids)
         merkle_root = merkle_tree.getRootHash()
 
@@ -100,7 +119,7 @@ class BlockchainNode(Blockchain):
         difficulty = 4
         nonce, block_hash = self.solve_puzzle(previous_hash, merkle_root, difficulty)
 
-        block = Block(previous_hash, merkle_root, nonce, transactions)
+        block = Block(previous_hash, merkle_root, nonce, transactions, time.monotonic_ns() // 1_000)
         self.finalized_txs.extend(transactions)
         self.blockchain.append(block)
         self.broadcast_block(block)
@@ -115,7 +134,7 @@ class BlockchainNode(Blockchain):
         target = '0' * difficulty
         nonce = 0
         while True:
-            block = Block(previous_hash, merkle_root, nonce, [])
+            block = Block(previous_hash, merkle_root, nonce, [], time.monotonic_ns() // 1_000)
             block_hash = block.compute_hash()
             if block_hash.startswith(target):
                 return nonce, block_hash
@@ -134,12 +153,20 @@ class BlockchainNode(Blockchain):
     def start_validator(self):
         self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
         self.register_task("create_block", self.create_block, delay=5, interval=5)
+        
+    def verify_sign_transaction(self, transaction: Transaction) -> bool:
+        pk = self.crypto.key_from_public_bin(transaction.pk)
+        blob = self.serializer.pack_serializable(transaction.payload)
+        if not self.crypto.is_valid_signature(pk, blob, transaction.sign):
+            return False
+        return True
 
     def check_transactions(self):
         for tx in self.pending_txs:
-            if self.balances[tx.sender] - tx.amount >= 0:
-                self.balances[tx.sender] -= tx.amount
-                self.balances[tx.receiver] += tx.amount
+            if (self.balances[tx.payload.sender] - tx.payload.amount >= 0 and
+                self.verify_sign_transaction(tx)):
+                self.balances[tx.payload.sender] -= tx.payload.amount
+                self.balances[tx.payload.receiver] += tx.payload.amount
                 self.pending_txs.remove(tx)
                 self.finalized_txs.append(tx)
 
@@ -148,8 +175,11 @@ class BlockchainNode(Blockchain):
         if self.executed_checks % 10 == 0:
             print(f'balance: {self.balances}')
 
+    # redundant?
     def verify_transaction(self, tx: Transaction) -> bool:
-        if self.balances[tx.sender] - tx.amount >= 0:
+        if (
+            self.balances[tx.payload.sender] - tx.payload.amount >= 0 and
+            self.verify_sign_transaction(tx)):
             return True
         return False
 
@@ -160,7 +190,7 @@ class BlockchainNode(Blockchain):
             print(f"[Node {self.node_id}] Block rejected due to mismatched previous hash.")
             return False
         
-        transaction_ids = [f"{tx.sender}-{tx.receiver}-{tx.amount}-{tx.nonce}" for tx in block.transactions]
+        transaction_ids = [f"{tx.payload.sender}-{tx.payload.receiver}-{tx.payload.amount}-{tx.payload.nonce}" for tx in block.transactions]
         merkle_tree = MerkleTree(transaction_ids)
         if block.merkle_root != merkle_tree.getRootHash():
             print(f"[Node {self.node_id}] Block rejected due to invalid Merkle root.")
@@ -181,15 +211,15 @@ class BlockchainNode(Blockchain):
     
     def apply_block_transactions(self, block: Block):
         for tx in block.transactions:
-            self.balances[tx.sender] -= tx.amount
-            self.balances[tx.receiver] += tx.amount
+            self.balances[tx.payload.sender] -= tx.payload.amount
+            self.balances[tx.payload.receiver] += tx.payload.amount
         self.finalized_txs.extend(block.transactions)
 
     @message_wrapper(Transaction)
     async def on_transaction(self, peer: Peer, payload: Transaction) -> None:
         if self.verify_transaction(payload):
-            if (payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.finalized_txs] and (
-            payload.sender, payload.nonce) not in [(tx.sender, tx.nonce) for tx in self.pending_txs]:
+            if (payload.payload.sender, payload.payload.nonce) not in [(tx.payload.sender, tx.payload.nonce) for tx in self.finalized_txs] and (
+            payload.payload.sender, payload.payload.nonce) not in [(tx.payload.sender, tx.payload.nonce) for tx in self.pending_txs]:
                 self.pending_txs.append(payload)
 
             # Gossip to other nodes
