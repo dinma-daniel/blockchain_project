@@ -87,27 +87,37 @@ class BlockchainNode(Blockchain):
         self.add_message_handler(Transaction, self.on_transaction)
         self.add_message_handler(BlockMessage, self.on_block_message)
 
+    def create_genesis_block(self):
+        transactions = []  # Genesis block has no transactions
+        merkle_tree = MerkleTree(transactions)
+        merkle_root = merkle_tree.getRootHash()
+
+        previous_hash = "0" * 64
+        difficulty = 4
+        nonce, block_hash = self.solve_puzzle(previous_hash, merkle_root, difficulty)
+
+        genesis_block = Block(
+            previous_hash=previous_hash,
+            merkle_root=merkle_root,
+            nonce=nonce,
+            transactions=transactions,
+            timestamp=int(time.time())
+        )
+        genesis_block.hash = block_hash
+
+        self.blockchain.append(genesis_block)
+        self.broadcast_block(genesis_block)
+        print("Genesis block created", genesis_block.hash)
+
     def on_start(self):
         print(f'[Node {self.node_id}] Community started with ID: {self.community_id}')
-        if self.node_id % 2 == 0:
-            self.start_client()
-        else:
-            self.start_validator()
+        if self.node_id == 0: # should be fine for demo =3
+            self.create_genesis_block()
 
-    def create_transaction(self):
-        peers = [i for i in self.get_peers() if self.node_id_from_peer(i) is not None and self.node_id_from_peer(i) % 2 == 1]
-        if not peers:
-            print(f'[Node {self.node_id}] No valid peers found for creating transaction.')
-            return
+        self.start_validator()
 
-        peer = random.choice(peers)
-        peer_id = self.node_id_from_peer(peer)
-
-        txp = TransactionPayload(self.node_id,
-                         peer_id,
-                         10,
-                         self.counter,
-                         )
+    def create_transaction(self, sender, receiver, amount):
+        txp = TransactionPayload(sender, receiver, amount, self.counter)
         
         blob = self.serializer.pack_serializable(txp)
         sign = self.crypto.create_signature(self.my_peer.key, blob)
@@ -115,8 +125,9 @@ class BlockchainNode(Blockchain):
         tx = Transaction(txp, pk, sign)
     
         self.counter += 1
-        print(f'[Node {self.node_id}] Sending transaction {txp.nonce} to {self.node_id_from_peer(peer)}')
-        self.ez_send(peer, tx)
+        self.pending_txs.append(tx)
+        print(f'[Node {self.node_id}] Created transaction from {sender} to {receiver} for {amount} amount')
+        return self.counter
 
     def create_block(self):
         if len(self.pending_txs) < self.block_size:
@@ -159,11 +170,6 @@ class BlockchainNode(Blockchain):
         for peer in self.get_peers():
             self.ez_send(peer, block_message)
 
-    def start_client(self):
-        self.register_task("tx_create",
-                           self.create_transaction, delay=1,
-                           interval=1)
-
     def start_validator(self):
         self.register_task("check_txs", self.check_transactions, delay=2, interval=1)
         self.register_task("create_block", self.create_block, delay=5, interval=5)
@@ -184,6 +190,7 @@ class BlockchainNode(Blockchain):
         self.executed_checks += 1
 
         if self.executed_checks % 10 == 0:
+            self.executed_checks = 0
             print(f'balance: {self.balances}')
 
     def verify_tx(self, tx: Transaction) -> bool:
@@ -243,7 +250,7 @@ class BlockchainNode(Blockchain):
                 self.pending_txs.append(payload)
 
             # Gossip to other nodes
-            for peer in [i for i in self.get_peers() if self.node_id_from_peer(i) % 2 == 1]:
+            for peer in self.get_peers():
                 self.ez_send(peer, payload)
 
     @message_wrapper(BlockMessage)

@@ -1,24 +1,24 @@
 import argparse
 import yaml
-from asyncio import run, all_tasks
+import asyncio
+import signal
 from ipv8.configuration import ConfigBuilder, default_bootstrap_defs
-from ipv8.util import create_event_with_signals, run_forever
+from ipv8.util import create_event_with_signals
 from ipv8_service import IPv8
 from algorithms import *
 from algorithms.blockchain import BlockchainNode
 from da_types import Blockchain
+from flask_server import start_flask_app
+import threading
 
 
 def get_algorithm(name: str) -> Blockchain:
     algorithms = {
-        # 'echo': EchoAlgorithm,
-        # 'election': RingElection,
         'blockchain': BlockchainNode,
     }
     if name not in algorithms.keys():
-        raise Exception(f'Cannot find select algorithm with name {name}')
+        raise Exception(f'Cannot find selected algorithm with name {name}')
     return algorithms[name]
-
 
 async def start_communities(node_id, connections, algorithm, use_localhost=True) -> None:
     event = create_event_with_signals()
@@ -40,8 +40,8 @@ async def start_communities(node_id, connections, algorithm, use_localhost=True)
         builder.finalize(), extra_communities={"blockchain_community": algorithm}
     )
     await ipv8_instance.start()
-    await event.wait()
-    await ipv8_instance.stop()
+
+    return ipv8_instance
 
 async def main():
     parser = argparse.ArgumentParser(
@@ -61,13 +61,37 @@ async def main():
         topology = yaml.safe_load(f)
         connections = topology[node_id]
 
+
     tasks = [start_communities(i, topology[i], alg, not args.docker) for i in range(4)]
-    await asyncio.gather(*tasks)
+    ipv8_instances = await asyncio.gather(*tasks)
+    
+    flask_thread = threading.Thread(target=start_flask_app, args=(alg, False, ), daemon=True)
+    flask_thread.start()
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        pass
+
+    for ipv8_instance in ipv8_instances:
+        await ipv8_instance.stop()
+
+def shutdown():
+    for task in asyncio.all_tasks():
+        task.cancel()
 
 if __name__ == "__main__":
+    def handle_exit(sig, frame):
+        print("Exiting...")
+        shutdown()
+
     try:
-        run(main())
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, handle_exit)
+
+        asyncio.run(main())
+
     except Exception as e:
         print(f"Error: {e}")
-        for task in all_tasks():
-            task.cancel()
+        shutdown()

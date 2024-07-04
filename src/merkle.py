@@ -27,7 +27,10 @@ class Node:
 
 class MerkleTree:
     def __init__(self, values: List[str]) -> None:
-        self.__buildTree(values)
+        if not values:
+            self.root = Node(None, None, Node.hash(""), "", False)
+        else:
+            self.__buildTree(values)
 
     def __buildTree(self, values: List[str]) -> None:
 
