@@ -36,14 +36,14 @@ class Transaction_NFT:
     receiver: int
     amount: int
     image_path: str
-    timestamp: float
+    timestamp: int
 
     def __init__(self, sender, receiver, amount, image_path):
         self.sender = sender
         self.receiver = receiver
         self.amount = amount
         self.image_path = image_path
-        self.timestamp = time.time()
+        self.timestamp = int(time.time())
         self.hash = self.calculate_hash()
 
     def calculate_hash(self):
@@ -189,7 +189,7 @@ class BlockchainNode(Blockchain):
     def verify_tx(self, tx: Transaction) -> bool:
         if self.balances[tx.payload.sender] - tx.payload.amount < 0:
             return False
-        return self.verify_sign_transaction(tx)
+        return self.verify_sign_of_tx(tx)
 
     def verify_block(self, block: Block) -> bool:
         print(f"[Node {self.node_id}] Verifying block with nonce {block.nonce} and hash {block.calculate_hash()}")
