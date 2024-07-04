@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from ipv8.community import CommunitySettings
 from ipv8.messaging.payload_dataclass import overwrite_dataclass
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ipv8.types import Peer
 
@@ -17,38 +17,45 @@ import time
 dataclass = overwrite_dataclass(dataclass)
 
 
-@dataclass()
+@dataclass(msg_id=11)
 class TransactionPayload:
     sender: int
     receiver: int
     amount: int
-    nonce: int = 1
+    nonce: int
+    
+@dataclass(msg_id=12)
+class NFTTransactionPayload:
+    sender: int
+    receiver: int
+    amount: int
+    nonce: int
+    timestamp: int
 
 @dataclass(msg_id=1)
 class Transaction:
     payload: TransactionPayload
     pk: bytes
     sign: bytes
-
+        
 @dataclass(msg_id=2)
-class Transaction_NFT:
-    sender: int
-    receiver: int
-    amount: int
+class NFTTransaction:
+    payload: NFTTransactionPayload
+    pk: bytes
+    sign: bytes
     image_path: str
-    timestamp: int
 
-    def __init__(self, sender, receiver, amount, image_path):
-        self.sender = sender
-        self.receiver = receiver
-        self.amount = amount
-        self.image_path = image_path
-        self.timestamp = int(time.time())
-        self.hash = self.calculate_hash()
-
-    def calculate_hash(self):
-        transaction_data = f'{self.sender}{self.receiver}{self.amount}{self.image_path}{self.timestamp}'
-        return hashlib.sha256(transaction_data.encode()).hexdigest()
+    def to_dict(self):
+        return {
+            "sender": self.payload.sender,
+            "receiver": self.payload.receiver,
+            "amount": self.payload.amount,
+            "nonce": self.payload.nonce,
+            "timestamp": self.payload.timestamp,
+            "pk": self.pk.hex(),
+            "sign": self.sign.hex(),
+            "image_path": self.image_path
+        }
 
 @dataclass(msg_id=90)
 class Block:
@@ -68,6 +75,10 @@ class Block:
 class BlockMessage:
     block: Block
 
+@dataclass(msg_id=100)
+class NFTTransactionMessage:
+    nft: NFTTransaction
+
 class BlockchainNode(Blockchain):
     community_id = b'harbourspaceuniverse'
 
@@ -85,6 +96,7 @@ class BlockchainNode(Blockchain):
         self.blockchain = []
 
         self.add_message_handler(Transaction, self.on_transaction)
+        self.add_message_handler(NFTTransactionMessage, self.on_nft)
         self.add_message_handler(BlockMessage, self.on_block_message)
 
     def create_genesis_block(self):
@@ -129,7 +141,38 @@ class BlockchainNode(Blockchain):
         print(f'[Node {self.node_id}] Created transaction from {sender} to {receiver} for {amount} amount')
         return self.counter
 
+    def create_nft(self, sender, receiver, image_path):
+        timestamp = int(time.time())
+        nft_payload = NFTTransactionPayload(sender=sender, receiver=receiver, amount=0, nonce=self.counter, timestamp=timestamp)
+        
+        blob = self.serializer.pack_serializable(nft_payload)
+        sign = self.crypto.create_signature(self.my_peer.key, blob)
+        pk = self.my_peer.key.pub().key_to_bin()
+        nft = NFTTransaction(nft_payload, pk, sign, image_path)
+    
+        self.counter += 1
+        self.nfts.append(nft)
+        self.broadcast_nft(nft)
+        print(f'[Node {self.node_id}] Created NFT transaction from {sender} to {receiver} for image {image_path}')
+        return nft
+
+    def broadcast_nft(self, nft: NFTTransaction):
+        nft_message = NFTTransactionMessage(nft)
+        for peer in self.get_peers():
+            self.ez_send(peer, nft_message)
+
+    def verify_nft(self, nft: NFTTransaction) -> bool:
+        pk = self.crypto.key_from_public_bin(nft.pk)
+        blob = self.serializer.pack_serializable(nft.payload)
+        if not self.crypto.is_valid_signature(pk, blob, nft.sign):
+            return False
+        return True
+
+    def apply_nft(self, nft: NFTTransaction):
+        self.nfts.append(nft)
+    
     def create_block(self):
+        print(len(self.pending_txs), self.block_size)
         if len(self.pending_txs) < self.block_size:
             return # not enough txs to create a block
 
@@ -230,11 +273,6 @@ class BlockchainNode(Blockchain):
             self.balances[tx.payload.receiver] += tx.payload.amount
         self.finalized_txs.extend(block.transactions)
 
-    def create_nft(self, image_path, owner):
-        nft = Transaction_NFT(sender=0, receiver=owner, amount=0, image_path=image_path)
-        self.nfts.append(nft)
-        return nft
-
     def transfer_nft(self, nft_hash, new_owner):
         for nft in self.nfts:
             if nft.hash == nft_hash:
@@ -248,6 +286,17 @@ class BlockchainNode(Blockchain):
             if (payload.payload.sender, payload.payload.nonce) not in [(tx.payload.sender, tx.payload.nonce) for tx in self.finalized_txs] and (
             payload.payload.sender, payload.payload.nonce) not in [(tx.payload.sender, tx.payload.nonce) for tx in self.pending_txs]:
                 self.pending_txs.append(payload)
+
+            # Gossip to other nodes
+            for peer in self.get_peers():
+                self.ez_send(peer, payload)
+
+    @message_wrapper(NFTTransactionMessage)
+    async def on_nft(self, peer: Peer, payload: NFTTransactionMessage) -> None:
+        nft = payload.nft
+        if self.verify_nft(nft):
+            if (nft.payload.sender, nft.payload.nonce) not in [(nft.payload.sender, nft.payload.nonce) for nft in self.nfts]:
+                self.apply_nft(nft)
 
             # Gossip to other nodes
             for peer in self.get_peers():

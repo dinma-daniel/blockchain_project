@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Create Transaction - Blockchain App{% endblock %}
+{% block title %}Transactions{% endblock %}
 
 {% block content %}
     <div class="header">
@@ -23,6 +23,13 @@
             <button type="submit" class="btn btn-primary btn-block">Create Transaction</button>
         </form>
     </div>
+
+    <div class="header">
+        <h2>All Transactions</h2>
+    </div>
+    <div id="transactions-list" class="list-group mx-auto" style="max-width: 500px;">
+        <!-- Transactions will be listed here -->
+    </div>
 {% endblock %}
 
 {% block scripts %}
@@ -43,10 +50,37 @@
             .then(response => response.json())
             .then(data => {
                 alert(data.message);
+                fetchTransactions();
             })
             .catch((error) => {
                 console.error('Error:', error);
             });
         });
+
+        function fetchTransactions() {
+            fetch('/transactions/all')
+            .then(response => response.json())
+            .then(data => {
+                const transactionsList = document.getElementById('transactions-list');
+                transactionsList.innerHTML = '';
+                data.transactions.forEach(transaction => {
+                    const listItem = document.createElement('div');
+                    listItem.className = 'list-group-item';
+                    listItem.innerHTML = `
+                        <div><strong>Sender:</strong> ${transaction.payload.sender}</div>
+                        <div><strong>Receiver:</strong> ${transaction.payload.receiver}</div>
+                        <div><strong>Amount:</strong> ${transaction.payload.amount}</div>
+                        <div><strong>Signature:</strong> ${transaction.sign}</div>
+                    `;
+                    transactionsList.appendChild(listItem);
+                });
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        }
+
+        // Fetch transactions on page load
+        document.addEventListener('DOMContentLoaded', fetchTransactions);
     </script>
 {% endblock %}

@@ -9,8 +9,9 @@ from algorithms import *
 from algorithms.blockchain import BlockchainNode
 from da_types import Blockchain
 from flask_server import start_flask_app
-import threading
 
+nodes_amount = 4
+blockchain_nodes = []
 
 def get_algorithm(name: str) -> Blockchain:
     algorithms = {
@@ -39,10 +40,13 @@ async def start_communities(node_id, connections, algorithm, use_localhost=True)
     ipv8_instance = IPv8(
         builder.finalize(), extra_communities={"blockchain_community": algorithm}
     )
+
     await ipv8_instance.start()
+    blockchain_nodes.append(ipv8_instance.overlays[0])
 
-    return ipv8_instance
-
+    await event.wait()
+        
+    
 async def main():
     parser = argparse.ArgumentParser(
         prog="Blockchain",
@@ -61,37 +65,18 @@ async def main():
         topology = yaml.safe_load(f)
         connections = topology[node_id]
 
+    tasks = [start_communities(i, topology[i], alg, not args.docker) for i in range(nodes_amount)]
+    tasks.append(run_flask_app())
 
-    tasks = [start_communities(i, topology[i], alg, not args.docker) for i in range(4)]
-    ipv8_instances = await asyncio.gather(*tasks)
+    await asyncio.gather(*tasks)
     
-    flask_thread = threading.Thread(target=start_flask_app, args=(alg, False, ), daemon=True)
-    flask_thread.start()
+    # nothing happens after.
 
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        pass
-
-    for ipv8_instance in ipv8_instances:
-        await ipv8_instance.stop()
-
-def shutdown():
-    for task in asyncio.all_tasks():
-        task.cancel()
+async def run_flask_app():
+    loop = asyncio.get_event_loop()
+    server = await loop.run_in_executor(None, start_flask_app, blockchain_nodes)
+    return server
 
 if __name__ == "__main__":
-    def handle_exit(sig, frame):
-        print("Exiting...")
-        shutdown()
-
-    try:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            signal.signal(sig, handle_exit)
-
-        asyncio.run(main())
-
-    except Exception as e:
-        print(f"Error: {e}")
-        shutdown()
+    asyncio.run(main())
+        

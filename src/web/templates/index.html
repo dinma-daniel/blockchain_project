@@ -18,11 +18,12 @@
             <button type="submit" class="btn btn-custom btn-block">Upload</button>
         </form>
     </div>
-    {% endblock %}
+{% endblock %}
 
 {% block scripts %}
     <script>
-        document.querySelector('.custom-file-upload').addEventListener('click', function() {
+        document.querySelector('.custom-file-upload').addEventListener('click', function(event) {
+            event.preventDefault();
             document.querySelector('#file-upload').click();
         });
 

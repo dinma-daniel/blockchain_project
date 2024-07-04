@@ -1,8 +1,8 @@
-from flask import Flask, request, jsonify, render_template
 import os
 import sys
+from flask import Flask, request, jsonify, render_template
 
-def start_flask_app(blockchain_node, debug=True):
+def start_flask_app(blockchain_nodes, debug=False):
     APP_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     TEMPLATE_PATH = os.path.join(APP_PATH, 'src', 'web', 'templates')
     STATIC_PATH = os.path.join(APP_PATH, 'src', 'web', 'static')
@@ -27,9 +27,9 @@ def start_flask_app(blockchain_node, debug=True):
         if file:
             filepath = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(filepath)
-            if blockchain_node:
-                nft = blockchain_node.create_nft(filepath, 'owner_public_key')
-                return jsonify({'message': 'NFT created successfully', 'nft': nft})
+            if get_blockchain_node(blockchain_nodes):
+                nft = blockchain_nodes[0].create_nft(0, 1, filepath)
+                return jsonify({'message': 'NFT created successfully', 'nft': nft.to_dict()})
             else:
                 return jsonify({'message': 'debug: NFT created successfully'})
 
@@ -38,8 +38,8 @@ def start_flask_app(blockchain_node, debug=True):
         data = request.get_json()
         nft_hash = data['nft_hash']
         new_owner = data['new_owner']
-        if blockchain_node:
-            nft = blockchain_node.transfer_nft(nft_hash, new_owner)
+        if get_blockchain_node(blockchain_nodes):
+            nft = blockchain_nodes[0].transfer_nft(nft_hash, new_owner)
             if nft:
                 return jsonify({'message': 'NFT transferred successfully', 'nft': nft})
             return jsonify({'error': 'NFT not found'})
@@ -49,11 +49,11 @@ def start_flask_app(blockchain_node, debug=True):
     @app.route('/stats', methods=['GET'])
     def full_chain():
         response = {}
-        if blockchain_node:
+        if get_blockchain_node(blockchain_nodes):
             response = {
-                'chain': [block.__dict__ for block in blockchain_node.blockchain],
-                'length': len(blockchain_node.blockchain),
-                'num_transactions': [len(block.transactions) for block in blockchain_node.blockchain],
+                'chain': [block.__dict__ for block in blockchain_nodes[0].blockchain],
+                'length': len(blockchain_nodes[0].blockchain),
+                'num_transactions': [len(block.transactions) for block in blockchain_nodes[0].blockchain],
             }
         else:
             response = {'data': 'debug: no data'}
@@ -70,13 +70,32 @@ def start_flask_app(blockchain_node, debug=True):
         if not all(k in data for k in required):
             return 'Missing values', 400
         index = ''
-        if blockchain_node:
-            index = blockchain_node.create_transaction(data['sender'], data['receiver'], data['amount'])
+        if get_blockchain_node(blockchain_nodes):
+            index = blockchain_nodes[0].create_transaction(int(data['sender']), int(data['receiver']), int(data['amount']))
         else:
             index = 'debug: no data'
-        return jsonify({'message': f'Transaction will be added to Block {index}'})
+        return jsonify({'message': f'Transaction №{index} will be added to Block ???'})
 
+    @app.route('/transactions/all', methods=['GET'])
+    def get_transactions():
+        tx_list = [
+            {
+                'payload': {
+                    'sender': tx.payload.sender,
+                    'receiver': tx.payload.receiver,
+                    'amount': tx.payload.amount,
+                    'nonce': tx.payload.nonce,
+                },
+                'pk': tx.pk.hex(),
+                'sign': tx.sign.hex()
+            } for tx in blockchain_nodes[0].pending_txs
+        ]
+        return jsonify({'transactions': tx_list})
     app.run(debug=debug, port=5001)
 
+def get_blockchain_node(blockchain_nodes):
+    if len(blockchain_nodes) > 0:
+        return blockchain_nodes[0] 
+
 if __name__ == "__main__":
-    start_flask_app(None)
+    start_flask_app(None, True)
