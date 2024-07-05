@@ -1,6 +1,7 @@
 import random
 import hashlib
 from merkle import MerkleTree
+
 from collections import defaultdict
 
 from ipv8.community import CommunitySettings
@@ -8,7 +9,7 @@ from ipv8.messaging.payload_dataclass import overwrite_dataclass
 from dataclasses import dataclass, field
 
 from ipv8.types import Peer
-
+from collections import deque
 from da_types import Blockchain, message_wrapper
 from typing import List
 import time
@@ -82,8 +83,9 @@ class NFTTransactionMessage:
 class BlockchainNode(Blockchain):
     community_id = b'harbourspaceuniverse'
 
-    def __init__(self, settings: CommunitySettings) -> None:
+    def __init__(self, settings: CommunitySettings, is_malicious=False) -> None:
         super().__init__(settings)
+        self.is_malicious = is_malicious
         self.counter = 1
         self.block_size = 3
         self.executed_checks = 0
@@ -94,10 +96,19 @@ class BlockchainNode(Blockchain):
         self.balances = defaultdict(lambda: 1000)
         
         self.blockchain = []
+        self.throughput_history = deque(maxlen=100)
+
+        if self.is_malicious:
+            self.add_message_handler(Transaction, self.on_malicious_transaction)
+        else:
+            self.add_message_handler(Transaction, self.on_transaction)
 
         self.add_message_handler(Transaction, self.on_transaction)
         self.add_message_handler(NFTTransactionMessage, self.on_nft)
         self.add_message_handler(BlockMessage, self.on_block_message)
+
+        self.start_time = time.time()  # Start time for measuring throughput
+        self.transaction_count = 0
 
     def create_genesis_block(self):
         transactions = []  # Genesis block has no transactions
@@ -138,8 +149,18 @@ class BlockchainNode(Blockchain):
     
         self.counter += 1
         self.pending_txs.append(tx)
+        self.transaction_count += 1  # Increment transaction count
+        if self.transaction_count % 100 == 0:
+            self.measure_throughput()
         print(f'[Node {self.node_id}] Created transaction from {sender} to {receiver} for {amount} amount')
         return self.counter
+    
+    def measure_throughput(self):
+        current_time = time.time()
+        time_elapsed = current_time - self.start_time
+        throughput = self.transaction_count / time_elapsed if time_elapsed > 0 else 0
+        self.throughput_history.append((current_time, throughput))
+        print(f"[Node {self.node_id}] Current throughput: {throughput:.2f} TPS")
 
     def create_nft(self, sender, receiver, image_path):
         timestamp = int(time.time())
@@ -279,6 +300,28 @@ class BlockchainNode(Blockchain):
                 nft.receiver = new_owner
                 return nft
         return None
+    
+    # check malicious nodes
+    def on_malicious_transaction(self, peer: Peer, payload: Transaction) -> None:
+        # Malicious node attempts to double-spend coins
+        double_spend_tx = Transaction(
+            payload=TransactionPayload(
+                sender=payload.payload.sender,
+                receiver=random.choice([peer.node_id for peer in self.get_peers()]),  # Choose random receiver
+                amount=payload.payload.amount,
+                nonce=payload.payload.nonce
+            ),
+            pk=payload.pk,
+            sign=payload.sign
+        )
+        
+        if self.verify_tx(double_spend_tx):
+            self.pending_txs.append(double_spend_tx)
+
+            # Gossip to other nodes
+            for peer in self.get_peers():
+                self.ez_send(peer, double_spend_tx)
+
 
     @message_wrapper(Transaction)
     async def on_transaction(self, peer: Peer, payload: Transaction) -> None:
@@ -290,6 +333,27 @@ class BlockchainNode(Blockchain):
             # Gossip to other nodes
             for peer in self.get_peers():
                 self.ez_send(peer, payload)
+
+    @message_wrapper(Transaction)
+    async def on_malicious_transaction(self, peer: Peer, payload: Transaction) -> None:
+        # Malicious node attempts to double-spend coins
+        double_spend_tx = Transaction(
+            payload=TransactionPayload(
+                sender=payload.payload.sender,
+                receiver=random.choice([peer.node_id for peer in self.get_peers()]),  # Choose random receiver
+                amount=payload.payload.amount,
+                nonce=payload.payload.nonce
+            ),
+            pk=payload.pk,
+            sign=payload.sign
+        )
+        
+        if self.verify_tx(double_spend_tx):
+            self.pending_txs.append(double_spend_tx)
+
+            # Gossip to other nodes
+            for peer in self.get_peers():
+                self.ez_send(peer, double_spend_tx)
 
     @message_wrapper(NFTTransactionMessage)
     async def on_nft(self, peer: Peer, payload: NFTTransactionMessage) -> None:
