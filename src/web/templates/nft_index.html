@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}NFT Info{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>{{ nft_info['message'] }}</h2>
+    <div class="nft-details">
+        <img src="{{ url_for('static', filename='nft_storage/' + nft_info['image_path']) }}" alt="NFT Image">
+        <p><strong>Sender:</strong> {{ nft_info['sender'] }}</p>
+        <p><strong>Receiver:</strong> {{ nft_info['receiver'] }}</p>
+        <p><strong>Token ID:</strong> {{ nft_info['token_id'] }}</p>
+        <p><strong>Timestamp:</strong> {{ nft_info['timestamp'] }}</p>
+        <p><strong>Signature:</strong> {{ nft_info['sign'] }}</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+</script>
+{% endblock %}

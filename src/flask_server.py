@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from flask import Flask, request, jsonify, render_template
 
 def start_flask_app(blockchain_nodes, debug=False):
@@ -9,7 +10,7 @@ def start_flask_app(blockchain_nodes, debug=False):
 
     app = Flask(__name__, template_folder=TEMPLATE_PATH, static_folder=STATIC_PATH)
 
-    UPLOAD_FOLDER = os.path.join(APP_PATH, 'NFT_storage')
+    UPLOAD_FOLDER = os.path.join(STATIC_PATH, 'NFT_storage')
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -28,10 +29,11 @@ def start_flask_app(blockchain_nodes, debug=False):
             filepath = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(filepath)
             if get_blockchain_node(blockchain_nodes):
-                nft = blockchain_nodes[0].create_nft(0, 1, filepath)
-                return jsonify({'message': 'NFT created successfully', 'nft': nft.to_dict()})
+                token_id = int(time.time()) + 34543
+                nft = blockchain_nodes[0].create_nft(0, 1, token_id, file.filename)
+                return render_template('nft_index.html', nft_info=nft.to_dict())
             else:
-                return jsonify({'message': 'debug: NFT created successfully'})
+                return render_template({'message': 'debug: NFT created successfully'})
 
     @app.route('/transfer', methods=['POST'])
     def transfer_nft():
